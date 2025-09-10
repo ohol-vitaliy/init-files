@@ -1,0 +1,19 @@
+::sysinit:/sbin/custom-init-script init
+::once:/sbin/custom-init-script once
+::restart:/bin/busybox init
+
+::respawn:/sbin/power-manager
+# ::respawn:/sbin/poll-goto-sleep
+# ::respawn:/sbin/poll-power-mode
+
+tty1::respawn:/sbin/auto-getty.sh tty1
+# tty2::askfirst:/sbin/auto-getty.sh tty2
+# tty3::askfirst:/sbin/auto-getty.sh tty3
+# tty4::askfirst:/sbin/auto-getty.sh tty4
+
+# Shutdown when pressing CTRL+ALT+DEL (disabled by default)
+# ::ctrlaltdel:kill -USR2 1
+::ctrlaltdel:/bin/busybox reboot -d 3
+
+# Stop all services on shutdown
+::shutdown:/sbin/custom-init-script shutdown

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+CUT="$(get_command cut)"
+ECHO="$(get_command echo)"
+GREP="$(get_command grep)"
+MOUNT="$(get_command mount)"
+
+mounts=$($MOUNT | $CUT -d" " -f1 | $GREP -c "/dev/sd")
+$ECHO "$mounts"

@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+AWK="$(get_command awk)"
+CAT="$(get_command cat)"
+ECHO="$(get_command echo)"
+
+result=""
+for therm in /sys/class/thermal/thermal_zone*; do
+	# shellcheck disable=SC2016
+	temp=$($AWK '{ printf "%.1f", $1/1000 }' "$therm"/temp)
+	type=$($CAT "$therm"/type)
+	if [ -z "$result" ]; then
+		result="$type(${temp}𝇈C)"
+	else
+		result="$result  $type(${temp}𝇈C)"
+	fi
+done
+$ECHO "$result"

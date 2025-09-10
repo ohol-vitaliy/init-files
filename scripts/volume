@@ -1,0 +1,116 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+AMIXER="$(get_command amixer)"
+AWK="$(get_command awk)"
+# TAIL="$(get_command tail)"
+
+if $AMIXER | grep -q "'Master'"; then
+	MASTER_EXISTS=1
+fi
+# pulsemixer --get-mute --get-volume | awk '
+# BEGIN { printf "Vol: " }
+# NR == 1 && $0 == "1"  { print "Mute"; exit; }
+# NR == 2 {
+# 	command = "dbar -w 11"
+# 	vol = ($1 + $2)/2;
+# 	printf vol | command
+# }'
+
+# amixer | \grep -Eo "'.*Speaker.*'" | sed "s/'//g" | xargs -P4 -I"{}" amixer set {} toggle
+# amixer | \grep -Eo "'.*Headphone.*'" | sed "s/'//g" | xargs -P4 -I"{}" amixer set {} toggle
+case "${1:-"get"}" in
+mute)
+	if [ -z "$MASTER_EXISTS" ]; then
+		$AMIXER set 'Headphone' mute >/dev/null 2>&1
+		$AMIXER set 'Headphone Left' mute >/dev/null 2>&1
+		$AMIXER set 'Headphone Right' mute >/dev/null 2>&1
+		$AMIXER set 'Speaker' mute >/dev/null 2>&1
+		$AMIXER set 'Speaker Left' mute >/dev/null 2>&1
+		$AMIXER set 'Speaker Right' mute >/dev/null 2>&1
+	else
+		$AMIXER set 'Master' mute >/dev/null 2>&1
+	fi
+	;;
+unmute)
+	if [ -z "$MASTER_EXISTS" ]; then
+		$AMIXER set 'Headphone' unmute >/dev/null 2>&1
+		$AMIXER set 'Headphone Left' unmute >/dev/null 2>&1
+		$AMIXER set 'Headphone Right' unmute >/dev/null 2>&1
+		$AMIXER set 'Speaker' unmute >/dev/null 2>&1
+		$AMIXER set 'Speaker Left' unmute >/dev/null 2>&1
+		$AMIXER set 'Speaker Right' unmute >/dev/null 2>&1
+	else
+		$AMIXER set 'Master' unmute >/dev/null 2>&1
+	fi
+	;;
+toggle)
+	if [ -z "$MASTER_EXISTS" ]; then
+		$AMIXER set 'Headphone' toggle >/dev/null 2>&1
+		$AMIXER set 'Headphone Left' toggle >/dev/null 2>&1
+		$AMIXER set 'Headphone Right' toggle >/dev/null 2>&1
+		$AMIXER set 'Speaker' toggle >/dev/null 2>&1
+		$AMIXER set 'Speaker Left' toggle >/dev/null 2>&1
+		$AMIXER set 'Speaker Right' toggle >/dev/null 2>&1
+	else
+		$AMIXER set 'Master' toggle >/dev/null 2>&1
+	fi
+	;;
+set)
+	vol=$(printf '%s\n' "${2:-"50"}" | sed 's/[^0-9]*//g')
+	if [ -z "$MASTER_EXISTS" ]; then
+		$AMIXER set 'Headphone' "$vol%" >/dev/null 2>&1
+		$AMIXER set 'Headphone Left' "$vol%" >/dev/null 2>&1
+		$AMIXER set 'Headphone Right' "$vol%" >/dev/null 2>&1
+		$AMIXER set 'Speaker' "$vol%" >/dev/null 2>&1
+		$AMIXER set 'Speaker Left' "$vol%" >/dev/null 2>&1
+		$AMIXER set 'Speaker Right' "$vol%" >/dev/null 2>&1
+	else
+		$AMIXER set 'Master' "$vol%" >/dev/null 2>&1
+	fi
+	;;
+up)
+	if [ -z "$MASTER_EXISTS" ]; then
+		$AMIXER set 'Headphone' 2%+ >/dev/null 2>&1
+		$AMIXER set 'Headphone Left' 2%+ >/dev/null 2>&1
+		$AMIXER set 'Headphone Right' 2%+ >/dev/null 2>&1
+		$AMIXER set 'Speaker' 2%+ >/dev/null 2>&1
+		$AMIXER set 'Speaker Left' 2%+ >/dev/null 2>&1
+		$AMIXER set 'Speaker Right' 2%+ >/dev/null 2>&1
+	else
+		$AMIXER set 'Master' 2%+ >/dev/null 2>&1
+	fi
+	;;
+down)
+	if [ -z "$MASTER_EXISTS" ]; then
+		$AMIXER set 'Headphone' 2%- >/dev/null 2>&1
+		$AMIXER set 'Headphone Left' 2%- >/dev/null 2>&1
+		$AMIXER set 'Headphone Right' 2%- >/dev/null 2>&1
+		$AMIXER set 'Speaker' 2%- >/dev/null 2>&1
+		$AMIXER set 'Speaker Left' 2%- >/dev/null 2>&1
+		$AMIXER set 'Speaker Right' 2%- >/dev/null 2>&1
+	else
+		$AMIXER set 'Master' 2%- >/dev/null 2>&1
+	fi
+	;;
+get)
+	{
+
+	if [ -z "$MASTER_EXISTS" ]; then
+		$AMIXER get 'Headphone'
+		# amixer get 'Headphone Left'
+		# amixer get 'Headphone Right'
+		$AMIXER get 'Speaker'
+		# amixer get 'Speaker Left'
+		# amixer get 'Speaker Right'
+	else
+		$AMIXER get 'Master'
+	fi
+	} 2>/dev/null | $AWK '
+	$0 ~ /\[off\]/{print "Vol: Mute";exit} 
+	match($0, /\[[0-9]+%\]/) {print "Vol: " substr($0, RSTART+1, RLENGTH-2);exit}'
+	;;
+esac

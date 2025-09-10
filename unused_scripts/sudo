@@ -1,0 +1,11 @@
+#!/bin/sh
+# doas replacement using su, with syslog logging
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <command> [args...]"
+    exit 1
+fi
+
+CMD="$*"
+logger -t doas-wrapper "user=$(whoami) ran: $CMD"
+su -c "$CMD"

@@ -1,0 +1,83 @@
+#!/usr/bin/env sh
+#brightnessctl -m | awk -F, '{ print $4 }' | dbar -w 11 -l "Bright:"
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+DBAR="$(get_command _dbar)"
+CAT="$(get_command cat)"
+ECHO="$(get_command echo)"
+HEAD="$(get_command head)"
+FIND="$(get_command find)"
+READLINK="$(get_command readlink)"
+PRINTF="$(get_command printf)"
+
+BACKLIGHT_ENTRY=$($FIND /sys/class/backlight -mindepth 1 -maxdepth 1 | $HEAD -n 1)
+
+if [ -L "$BACKLIGHT_ENTRY" ]; then
+	BACKLIGHT_PATH=$($READLINK -f "$BACKLIGHT_ENTRY")
+else
+	BACKLIGHT_PATH="$BACKLIGHT_ENTRY"
+fi
+
+CUR="$BACKLIGHT_PATH/brightness"
+MAX="$BACKLIGHT_PATH/max_brightness"
+
+current=$($CAT "$CUR")
+max=$($CAT "$MAX")
+
+percent=$((current * 100 / max))
+
+if [ $# -eq 0 ]; then
+	$PRINTF "Bright: %s%%\n" "$percent"
+	exit 0
+fi
+
+case "$1" in
+up)
+	if [ "$2" ]; then
+		step="$2"
+	else
+		step=5
+	fi
+
+	new_percent=$((percent + step))
+	# $ECHO "$new_percent"
+	;;
+down)
+	if [ "$2" ]; then
+		step="$2"
+	else
+		step=5
+	fi
+
+	new_percent=$((percent - step))
+	# $ECHO "$new_percent"
+	;;
+set)
+	if [ "$2" ]; then
+		new_percent="$2"
+	else
+		new_percent=100
+	fi
+	;;
+*)
+	# no change, just report
+	;;
+esac
+
+if [ "$new_percent" -gt 100 ]; then
+	new_percent=100
+elif [ "$new_percent" -lt 0 ]; then
+	new_percent=0
+fi
+
+# $ECHO "$max"
+# stupid rounding trick
+# round(X/Y) = (X+Y/2)/Y
+new_val=$((((max * new_percent) + 50) / 100))
+# $ECHO "$new_val"
+$ECHO "$new_val" >"$CUR"
+percent=$new_percent
+
+$PRINTF '%s%%\n' "$percent" | $DBAR 11 "Bright: "
