@@ -1,0 +1,5 @@
+GRUB_TIMEOUT=0
+GRUB_TIMEOUT_STYLE="hidden"
+GRUB_DISABLE_SUBMENU=y
+GRUB_DISABLE_RECOVERY=true
+GRUB_CMDLINE_LINUX_DEFAULT="modules=sd-mod,usb-storage,ext4 quiet rootfstype=ext4 video=HDMI-A-1:d video=DP-1:d"

@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+PRINTF="$(get_command printf)"
+
+read current
+current="${current%%\%}"
+width=${1:-10}
+label=${2:-""}
+
+total=100
+filled=$((current * width / total))
+empty=$((width - filled))
+
+bar=""
+i=0
+while [ $i -lt $filled ]; do
+	bar="$bar="
+	i=$((i + 1))
+done
+
+i=0
+while [ $i -lt $empty ]; do
+	bar="$bar "
+	i=$((i + 1))
+done
+
+percent=$((current * 100 / total))
+
+$PRINTF '%s%d%% [%s]\n' "$label" "$percent" "$bar"

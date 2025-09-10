@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+AWK="$(get_command awk)"
+CAT="$(get_command cat)"
+# GREP="$(get_command grep)"
+# SLEEP="$(get_command sleep)"
+# ps -A -o pcpu | awk '
+# BEGIN { usage = 0 }
+# NR > 1 { usage+=$1 }
+# END { printf "CPU %.2f%%", usage }
+# '
+
+# v=$(cat <(grep 'cpu ' /proc/stat) <(sleep 1 && grep 'cpu ' /proc/stat))
+# echo "$v" | awk -v RS="" '{printf "%.2f%\n", ($13-$2+$15-$4)*100/($13-$2+$15-$4+$16-$5)}'
+
+# cpu1=$(awk '$1 == "cpu" { v=($2+$4)*100/($2+$4+$5); printf "%.2f",v; exit; }' /proc/stat)
+# sleep 1s
+# cpu2=$(awk '$1 == "cpu" { v=($2+$4)*100/($2+$4+$5); printf "%.2f",v; exit; }' /proc/stat)
+# echo "$cpu1 $cpu2"
+
+# usage1=$(awk '$1 == "cpu" { printf "%.2f %.2f", ($2+$4), ($2+$4+$5) }' /proc/stat)
+# sleep 1s
+# usage2=$(awk '$1 == "cpu" { printf "%.2f %.2f", ($2+$4), ($2+$4+$5) }' /proc/stat)
+
+# echo "$usage1 $usage2" | awk '{ printf "CPU %.2f%%", (($3-$1)*100/($4-$2)) }'
+
+# shellcheck disable=SC2016
+# $CAT <($GREP 'cpu ' /proc/stat) <($SLEEP 1 && $GREP 'cpu ' /proc/stat) | $AWK -v RS="" '
+# {
+# 	usage_first=$2+$3+$4+$7+$8;
+# 	usage_second=$13+$14+$15+$18+$19;
+# 	usage=usage_second-usage_first;
+# 	idle=$16-$5;
+# 	printf "CPU %.2f%%", usage*100/(usage+idle);
+# }
+# '
+
+$CAT /proc/loadavg | $AWK '{ printf "%.2f %.2f %.2f %s", $1, $2, $3, $4 }'
