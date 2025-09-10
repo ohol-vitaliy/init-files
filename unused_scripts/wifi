@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+AWK="$(get_command awk)"
+
+# shellcheck disable=SC2016
+nmcli c show --active | $AWK '/wifi/ {print $1}'
