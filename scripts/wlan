@@ -1,0 +1,163 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+BUSYBOX="$(get_command busybox)"
+AWK="$(get_command awk)"
+CAT="$(get_command cat)"
+GREP="$(get_command grep)"
+ECHO="$(get_command echo)"
+IP="$(get_command ip)"
+IW="$(get_command iw)"
+KILLALL="$(get_command killall)"
+PRINTF="$(get_command printf)"
+XARGS="$(get_command xargs)"
+TR="$(get_command tr)"
+WPA_SUPPLICANT="$(get_command wpa_supplicant)"
+
+CONFIG="/etc/wpa.conf"
+UDHCPC_SCRIPT="/etc/udhcpc.script"
+
+usage() {
+	$CAT <<EOF
+Usage:
+  $0 scan
+  $0 config <ssid> <pass> [mode]
+  $0 info
+  $0 name
+  $0 connect
+
+Examples:
+  $0 scan
+  $0 config MySSID MyPass WPA2
+  $0 info
+EOF
+	exit 1
+}
+
+for ifpath in /sys/class/net/*; do
+	name=${ifpath##*/}
+
+	case "$name" in
+	wlan* | wlp* | wifi*)
+		iface="$name"
+		;;
+	esac
+done
+unset ifpath
+unset name
+
+if [ -z "$iface" ]; then
+	$ECHO "Network interface not found" 1>&2
+	usage
+fi
+
+cmd=$1
+shift
+
+case "$cmd" in
+scan)
+	$ECHO "Scanning on interface: $iface"
+	# shellcheck disable=SC2016
+	$IW "$iface" scan | $AWK '/SSID: / { $1=""; sub(/^ /,""); print }'
+	exit 0
+	;;
+
+config)
+	if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+		$ECHO "Error: 'config' requires <ssid> <pass> [mode]."
+		usage
+	fi
+
+	ssid=$1
+	pass=$2
+	mode=${3:-"wpa2"}
+
+	if ! $ECHO "$mode" | $GREP -Eq "^(open|wep|wpa|wpa2)$"; then
+		$ECHO "Mode \"$mode\" does not exist" 1>&2
+		usage
+	fi
+
+	$PRINTF "Configuring interface %s\\n Mode %s\\n SSID %s\\n pass %s\\n" "$iface" "$mode" "$ssid" "$pass" # | column -t -s " "
+	$PRINTF "ctrl_interface=DIR=/var/run/wpa_supplicant
+		ctrl_interface_group=wheel
+		update_config=1
+		ap_scan=1
+
+		network={
+		ssid=\"%s\"
+		scan_ssid=1
+		" "$ssid" >"$CONFIG"
+
+	if $ECHO "$mode" | $GREP -Eq "^(open|wep)$"; then
+		$ECHO "key_mgmt=NONE" >>"$CONFIG"
+
+		if [ "$mode" = "web" ]; then
+			$PRINTF "wep_key0=\"%s\"
+				wep_tx_keyidx=0" "$pass" >>"$CONFIG"
+		fi
+	elif $ECHO "$mode" | $GREP -Eq "^(wpa|wpa2)$"; then
+		if [ "$mode" = "wpa2" ]; then
+			$ECHO "proto=RSN" >>"$CONFIG"
+		fi
+
+		$ECHO "key_mgmt=WPA-PSK" >>"$CONFIG"
+		pass=$($WPA_PASSPHRASE "$ssid" "$pass" | $GREP 'psk=' | $TR -d '\t')
+		$ECHO "$pass" >>"$CONFIG"
+	else
+		usage
+	fi
+
+	$PRINTF "priority=1\\n}" >>"$CONFIG"
+	exit 0
+	;;
+
+name)
+	# shellcheck disable=SC2016
+	wlan=$($IW dev "$iface" link | $AWK 'tolower($0) ~ /ssid/ {print $2}')
+	$ECHO "$wlan"
+	exit 0
+	;;
+
+info)
+	# shellcheck disable=SC2016
+	wlan=$($IW dev "$iface" link | $AWK 'tolower($0) ~ /ssid/ {print $2}')
+	# shellcheck disable=SC2016
+	wlan_p=$($IW dev "$iface" link | $GREP -E "(signal|bitrate)" | $AWK -F: '{print $2}' | $AWK '{print $1" "$2}' | $TR '\n' ' ' | $XARGS)
+	$ECHO "$wlan($wlan_p)"
+	exit 0
+	;;
+
+connect)
+	if ! [ -f "$CONFIG" ]; then
+		$ECHO "Config missing. Please do '$0 $iface config ...' before connecting"
+		exit 1
+	fi
+
+	$ECHO "Connecting interface: $iface"
+	$IP link set "$iface" down
+	$KILLALL wpa_supplicant udhcpc dhclient 2>/dev/null
+	$IW "$iface" set type managed
+	$IP link set "$iface" up
+	$WPA_SUPPLICANT -Dwext -B -i "$iface" -c "$CONFIG"
+	$BUSYBOX udhcpc -i "$iface" -s "$UDHCPC_SCRIPT"
+	# dhclient "$iface"
+	status=$($PING 8.8.8.8 -c 6 | $GREP -Eo "[0-9]+%")
+	$PRINTF "%s  =>  " "$status"
+
+	if [ "$status" = "100%" ]; then
+		$PRINTF "FAIL"
+	else
+		$PRINTF "SUCCESS"
+	fi
+
+	$PRINTF "\\n"
+	;;
+
+*)
+	$ECHO "Error: Unknown command '$cmd'"
+	usage
+	;;
+esac
