@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+AWK="$(get_command awk)"
+
+# awk '
+# /MemTotal/ { total = $2/1024/1024 }
+# /MemAvailable/ { avail = $2/1024/1024 }
+# END { printf "RAM %.2f GB/%.2f GB", total-avail, avail }
+# ' /proc/meminfo
+
+# shellcheck disable=SC2016
+$AWK '
+/MemTotal/ {total=$2}
+/MemFree/ {free=$2}
+/Buffers/ {buffers=$2}
+/^Cached/ {cached=$2}
+/SReclaimable/ {sreclaim=$2}
+/Shmem/ {shmem=$2}
+END {
+avail = free + buffers + cached + sreclaim - shmem
+used  = total - avail
+printf "RAM: %.2f GB/%.2f GB", used/1024/1024, avail/1024/1024
+}' /proc/meminfo

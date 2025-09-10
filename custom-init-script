@@ -1,0 +1,361 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+# . /etc/rc.conf
+INITLOG_DIR="/var/log/boot"
+# INITLOG_FILE="$INITLOG_DIR/initlog"
+INITLOG_DMESG_FILE="$INITLOG_DIR/dmesg"
+INITLOG_ONCE_FILE="$INITLOG_DIR/once"
+RANDOM_SEED_DIR="/var/lib/misc"
+RANDOM_SEED_FILE="$RANDOM_SEED_DIR/random-seed"
+
+WLAN_SCRIPT="$(get_command _wlan)"
+BRIGHT_SCRIPT="$(get_command _bright)"
+VOLUME_SCRIPT="$(get_command _volume)"
+
+BUSYBOX="$(get_command busybox)"
+
+AWK="$(get_command awk)"
+BASENAME="$(get_command basename)"
+CAT="$(get_command cat)"
+CHGRP="$(get_command chgrp)"
+CHMOD="$(get_command chmod)"
+DATE="$(get_command date)"
+DD="$(get_command dd)"
+DMESG="$(get_command dmesg)"
+EXIT="$(get_command exit)"
+FIND="$(get_command find)"
+FSCK="$(get_command fsck)"
+HALT="$BUSYBOX halt"
+HOSTNAME="$(get_command hostname)"
+ID="$(get_command id)"
+IP="$(get_command ip)"
+KILL="$(get_command kill)"
+KLOGD="$BUSYBOX klogd"
+LN="$(get_command ln)"
+LOGROTATE="$(get_command logrotate)"
+MANDB="$(get_command mandb)"
+MDEV="$BUSYBOX mdev"
+MKDIR="$(get_command mkdir)"
+MKNOD="$(get_command mknod)"
+MODPROBE="$(get_command modprobe)"
+MOUNT="$(get_command mount)"
+MOUNTPOINT="$(get_command mountpoint)"
+PRINTF="$(get_command printf)"
+READLINK="$(get_command readlink)"
+RFKILL="$(get_command rfkill)"
+SETTERM="$(get_command setterm)"
+SHELL="$(get_command sh)"
+SHIFT="$(get_command shift)"
+SLEEP="$(get_command sleep)"
+SORT="$(get_command sort)"
+STTY="$(get_command stty)"
+SWAPOFF="$(get_command swapoff)"
+SWAPON="$(get_command swapon)"
+SYNC="$(get_command sync)"
+SYSLOGD="$BUSYBOX syslogd"
+TOUCH="$(get_command touch)"
+UMOUNT="$(get_command umount)"
+UNSET="$(get_command unset)"
+WAIT="$(get_command wait)"
+XARGS="$(get_command xargs)"
+
+log() {
+	color="$1"
+	$SHIFT
+	$PRINTF "\033[1;34m[%7s]\033[00m \033[1;3%sm%s\033[00m\n" "$($AWK '{print $1}' '/proc/uptime')" "$color" "$*"
+}
+
+require_sudo() {
+	if [ "$("$ID" -u)" != 0 ]; then
+		log 1 "Requested operation requires superuser privilege"
+		$EXIT 1
+	fi
+}
+
+panic() {
+	log 5 ""
+	log 5 "********************  SOMETHING FAILED  ********************"
+	log 5 "*                                                          *"
+	log 5 "*  Please fix the issue and reboot. Note that the root     *"
+	log 5 "*  file system is currently mounted read-only. To remount  *"
+	log 5 "*  it read-write type: mount -n -o remount,rw /            *"
+	log 5 "*  When you exit the maintainance shell the system will    *"
+	log 5 "*  reboot automatically.                                   *"
+	log 5 "*                                                          *"
+	log 5 "************************************************************"
+	log 5 ""
+	sleep 60
+	# $BUSYBOX sulogin -p
+	$BUSYBOX ash
+	log 5 "Automatic reboot in progress..."
+
+	[ -r '/etc/fstab' ] && $UMOUNT -a -r
+	$MOUNT -o remount,ro /
+	$SYNC
+	$BUSYBOX reboot -f
+	$EXIT 0
+}
+
+init_mdev() {
+	log 3 "Creating basic nodes..."
+	[ ! -e /dev/null ] && $MKNOD /dev/null c 1 3
+	[ ! -e /dev/zero ] && $MKNOD /dev/zero c 1 5
+	[ ! -e /dev/random ] && $MKNOD /dev/random c 1 8
+	[ ! -e /dev/urandom ] && $MKNOD /dev/urandom c 1 9
+	[ ! -e /dev/tty1 ] && $MKNOD /dev/tty1 c 4 1
+	[ ! -e /dev/tty ] && $MKNOD /dev/tty c 5 0
+	[ ! -e /dev/console ] && $MKNOD /dev/console c 5 1
+	[ ! -e /dev/ptmx ] && $MKNOD /dev/ptmx c 5 2
+
+	$LN -snf /proc/self/fd /dev/fd
+	$LN -snf fd/0 /dev/stdin
+	$LN -snf fd/1 /dev/stdout
+	$LN -snf fd/2 /dev/stderr
+	[ -e /proc/kcore ] && $LN -snf /proc/kcore /dev/core
+
+	log 3 "Triggering mdev..."
+	$MDEV -s -d
+
+	log 3 "Poking devices..."
+	for i in /sys/class/net/*/uevent; do
+		$PRINTF 'add' >"$i"
+	done 2>/dev/null
+	$UNSET i
+	for i in /sys/bus/usb/devices/*; do
+		case "${i##*/}" in
+		[0-9]*-[0-9]*)
+			$PRINTF 'add' >"$i/uevent"
+			;;
+		esac
+	done
+	$UNSET i
+
+	log 3 "Loading kernel modules..."
+	$MODPROBE cpufreq_powersave cpufreq dpms-standby ethernet intel-hda-powersave \
+		intel-sata-powermgmt nmi-watchdog pcie-aspm runtime-pm sched-mc-power-savings \
+		sched-smt-power-savings terminal-blanking 2>/dev/null
+	# Load kernel modules, run twice.
+	$FIND /sys -name 'modalias' -type f -exec cat '{}' + | $SORT -u | $XARGS "$MODPROBE" -b -a 2>/dev/null
+	$FIND /sys -name 'modalias' -type f -exec cat '{}' + | $SORT -u | $XARGS "$MODPROBE" -b -a 2>/dev/null
+
+	log 3 "Changing ownership of backlight device..."
+	$CHGRP video /sys/class/backlight/*/brightness
+	$CHMOD 0664 /sys/class/backlight/*/brightness
+}
+
+configure_network_devices() {
+	$CHMOD -R 0777 /sys/class/net/*
+
+	for iface in /sys/class/net/*; do
+		# disable wake-on-lan
+		[ -e "$iface/device/power/wakeup" ] && $PRINTF disabled >"$iface/device/power/wakeup"
+
+		# enable wifi and loop, disable everything else
+		name=$($BASENAME "$iface")
+
+		case "$name" in
+		wlan* | wlp* | lo)
+			$IP link set "$name" up
+			log 2 "Enabled $name..."
+			# iw dev "$iface" set power_save on
+			;;
+		*)
+			$IP link set "$name" down
+			log 2 "Disabled $name..."
+
+			driver=$($BASENAME "$($READLINK -f "$iface/device/driver/module" 2>/dev/null)")
+
+			if [ -n "$driver" ]; then
+				log 2 "Unloading driver $driver"
+				$MODPROBE -r "$driver" 2>/dev/null
+			fi
+			;;
+		esac
+	done
+
+	$UNSET iface
+	$UNSET name
+	$UNSET driver
+
+	log 3 "Disabling bluetooth"
+	$RFKILL block bluetooth
+}
+
+startup() {
+	START=$($DATE +%s)
+
+	log 3 "Mounting dev filesystems."
+	$UMOUNT /dev/pts /dev/shm /dev/mqueue /dev >/dev/null 2>&1
+	$MKDIR -p /dev
+	$MOUNTPOINT -q /dev || $MOUNT -t devtmpfs dev /dev -o mode=0755,nosuid
+
+	log 3 "Mounting API filesystems..."
+	$MKDIR -p /dev/pts /dev/shm /dev/mqueue /proc /sys /run /tmp
+	(
+		$MOUNTPOINT -q /dev/pts || $MOUNT -t devpts devpts /dev/pts -o mode=0620,gid=5,nosuid,noexec
+		$MOUNTPOINT -q /dev/shm || $MOUNT -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
+		$MOUNTPOINT -q /dev/mqueue || $MOUNT -t mqueue mqueue /dev/mqueue -o nosuid,nodev
+	) &
+
+	log 3 "Mounting base filesystems."
+	(
+		$MOUNTPOINT -q /proc || $MOUNT -t proc proc /proc -o nosuid,noexec,nodev
+		$MOUNTPOINT -q /sys || $MOUNT -t sysfs sys /sys -o nosuid,noexec,nodev
+		$MOUNTPOINT -q /run || $MOUNT -t tmpfs run /run -o mode=0755,nosuid,nodev
+		$MOUNTPOINT -q /tmp || $MOUNT -t tmpfs tmp /tmp -o mode=1777,nosuid,nodev
+	) &
+
+	if [ -d "/sys/fs/cgroup" ]; then
+		log 3 "Mounting cgroup."
+		$MOUNTPOINT -q /sys/fs/cgroup || $MOUNT -t cgroup2 none /sys/fs/cgroup &
+	fi
+
+	$WAIT
+
+	log 3 "Initializing mdev"
+	init_mdev
+
+	# log 3 "Mounting root as readonly..."
+	# $MOUNT -o remount,ro / || panic
+
+	# log 3 "Checking filesystems..."
+	# fsck -ATat noopts=_netdev > /run/log/fsck
+	# $FSCK -A -T -C -a
+	# [ $? -gt 1 ] && panic
+
+	log 3 "Remounting /"
+	$MOUNT -o remount,rw / || true
+
+	if [ -r '/etc/fstab' ]; then
+		log 3 "Mounting all filesystems in /etc/fstab"
+		$MOUNT -a || panic
+		log 3 "Activating swap"
+		$SWAPON -a || panic
+	fi
+
+	# log 3 "Initializing udev..."
+	# "$UDEV" --daemon
+	# "$UDEVADM" trigger --action=add --type=subsystems
+	# "$UDEVADM" trigger --action=add --type=devices
+	# "$UDEVADM" settle
+
+	# log 3 "Setting kernel parameters."
+	# /sbin/sysctl -p > /dev/null
+	# echo "4194304" >"/proc/sys/kernel/pid_max"
+
+	log 3 "Applying random seed to /dev/urandom"
+	(
+		[ -s "$RANDOM_SEED_FILE" ] && $CAT "$RANDOM_SEED_FILE" >/dev/urandom && log 2 "Seed applied"
+	) &
+
+	log 3 "Setting hostname..."
+	(
+		[ -s /etc/hostname ] && $HOSTNAME -F /etc/hostname && log 2 "Hostname applied"
+	) &
+
+	log 3 "Setting network devices..."
+	configure_network_devices &
+
+	if [ -x "$SETTERM" ]; then
+		log 3 "Setting term blanking in 1 minute"
+		(
+			$SETTERM -blank 1 -powerdown 10
+		) &
+	fi
+
+	$WAIT
+	# echo 900 >/sys/module/kernel/parameters/consoleblank # blank after 15 mins
+
+	$MKDIR -p "$INITLOG_DIR"
+	$CHMOD 0644 "$INITLOG_DMESG_FILE"
+	$DMESG >"$INITLOG_DMESG_FILE"
+
+	END=$($DATE +%s)
+	ELAPSED=$((END - START))
+	log 6 "Init script took $ELAPSED seconds"
+
+	log 6 "$PATH"
+}
+
+shutdown() {
+	log 3 ""
+	log 3 ""
+	log 3 "Shutting down."
+
+	log 3 "Saving random seed for next boot."
+	$MKDIR -p "$RANDOM_SEED_DIR"
+	$TOUCH "$RANDOM_SEED_FILE"
+	$CHMOD 600 "$RANDOM_SEED_FILE"
+	$DD if=/dev/urandom of=$RANDOM_SEED_FILE count=1 bs=512 >/dev/null 2>&1
+
+	log 3 "Halting."
+	$HALT -w
+
+	log 3 "Sending TERM signal to all processes..."
+	$KILL -s TERM -1
+	$SLEEP 2
+	log 3 "Sending KILL signal to all processes..."
+	$KILL -s KILL -1
+
+	$SYNC
+
+	if [ -r '/etc/fstab' ]; then
+		log 3 "Swapoff."
+		$SWAPOFF -a >/dev/null 2>&1
+		log 3 "Unmounting all filesystems."
+		$UMOUNT -a -r >/dev/null 2>&1
+	fi
+}
+
+once() {
+	$MKDIR -p "$INITLOG_DIR"
+	$TOUCH "$INITLOG_ONCE_FILE"
+	$CHMOD 0644 "$INITLOG_ONCE_FILE"
+
+	{
+		[ -x "$LOGROTATE" ] && $LOGROTATE /etc/logrotate.conf
+		$KLOGD -n &
+		$SYSLOGD -n -O /var/log/messages &
+
+		$FIND /var/cache/man -type f -name "*.gz" -atime +6 -delete
+		[ -x "$MANDB" ] && $MANDB --quiet
+
+		# /lib/console-setup/console-setup.sh
+		# /usr/sbin/tlp init start
+		# /usr/sbin/tlp init stop
+		# /usr/sbin/powertop --auto-tune
+		# "$RM" -f /var/run/laptop-mode-tools/enabled
+		# "$RM" -f /var/run/laptop-mode-tools/state
+		# "$LAPTOP_MODE" init force
+
+		[ -x "$WLAN_SCRIPT" ] && $WLAN_SCRIPT connect &
+		[ -x "$BRIGHT_SCRIPT" ] && $BRIGHT_SCRIPT set 80
+		[ -x "$VOLUME_SCRIPT" ] && $VOLUME_SCRIPT set 50
+	} >>"$INITLOG_ONCE_FILE" 2>&1
+}
+
+set +e # disable exit-on-error globally
+[ "${#}" -eq 0 ] && log 1 "Usage: $0 [init | once | down]"
+$STTY onlcr # avoid staircase effect
+
+case $1 in
+init)
+	require_sudo
+	startup
+	;;
+once)
+	require_sudo
+	once
+	;;
+shutdown | down | off)
+	require_sudo
+	shutdown
+	;;
+*)
+	log 1 "Usage: $0 [init | once | down]"
+	;;
+esac

@@ -1,0 +1,61 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+AWK="$(get_command awk)"
+CAT="$(get_command cat)"
+CUT="$(get_command cut)"
+GREP="$(get_command grep)"
+ECHO="$(get_command echo)"
+PRINTF="$(get_command printf)"
+SORT="$(get_command sort)"
+TR="$(get_command tr)"
+
+pagesize=$(getconf PAGESIZE 2>/dev/null || $ECHO 4096)
+$CAT <<EOF
+SIZE - data + stack
+RSS - actual RAM the process is using right now (includes shared libs)
+Private - RAM uniquely used by this process (wihout shared libs)
+
+EOF
+$PRINTF "%13s %13s %13s %-8s %s\n" "SIZE(MB)" "RSS(MB)" "Private(MB)" "USER" "COMMAND"
+
+for pid in /proc/[0-9]*; do
+	pid=${pid#/proc/}
+
+	# shellcheck disable=SC2016
+	read -r size_mb rss_mb priv_mb <<EOF
+    $($AWK -v ps="$pagesize" '{
+        # statm: size rss shared text lib data dt
+        data=$6; rss=$2; shared=$3;
+        size_mb=(data*ps)/1048576;              # ps -o size equivalent
+        rss_mb=(rss*ps)/1048576;                # resident
+        priv_mb=((rss-shared)*ps)/1048576;      # private
+        printf "%.2f %.2f %.2f\n", size_mb, rss_mb, priv_mb
+    }' "/proc/$pid/statm" 2>/dev/null)
+EOF
+
+	[ -z "$size_mb" ] && continue
+
+	cmd="[?]"
+	[ -f "/proc/$pid/cmdline" ] && cmd=$($TR '\0\n' '  ' <"/proc/$pid/cmdline" | $CUT -c1-80 2>/dev/null)
+	# skipping kernel threads
+	# 	# [ -f "/proc/$pid/comm" ] && cmd="[$(cat /proc/$pid/comm)]"
+	[ -z "$cmd" ] && continue
+
+	# shellcheck disable=SC2016
+	uid=$($AWK '/^Uid:/ {print $2; exit}' "/proc/$pid/status" 2>/dev/null)
+	if [ -n "$uid" ]; then
+		user=$(getent passwd "$uid" 2>/dev/null | $CUT -d: -f1)
+		[ -z "$user" ] && user="$uid"
+	else
+		user="?"
+	fi
+
+	$PRINTF "%13s %13s %13s %-8s %s\n" "$size_mb" "$rss_mb" "$priv_mb" "$user" "$cmd"
+done | $SORT -k2,2nr
+
+# shellcheck disable=SC2016
+$GREP -E 'KernelStack|Slab|PageTables|VmallocUsed' /proc/meminfo | $AWK '{sum += $2} END {print "\nKernel RAM usage: " sum/1024 " MB"}'

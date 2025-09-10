@@ -1,0 +1,41 @@
+#!/usr/bin/env sh
+
+dev="${1:?Usage: mu <device>}"
+dir="/mnt/$dev"
+
+# If directory exists, make sure it's empty and not a mountpoint
+if [ -d "$dir" ]; then
+	if mountpoint -q "$dir"; then
+		echo "Error: $dir is already a mountpoint" >&2
+		exit 1
+	fi
+
+	if [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+		echo "Error: $dir is not empty" >&2
+		exit 1
+	fi
+
+	rmdir "$dir" 2>/dev/null || {
+		echo "Error: Failed to remove old $dir" >&2
+		exit 1
+	}
+fi
+
+# Create mount directory
+mkdir -p "$dir" || {
+	echo "Error: Failed to create $dir" >&2
+	exit 1
+}
+
+# Mount device
+if ! mount "/dev/$dev" "$dir"; then
+	echo "Error: Failed to mount /dev/$dev on $dir" >&2
+	rmdir "$dir" 2>/dev/null
+	exit 1
+fi
+
+# Change into mount directory
+cd "$dir" 2>/dev/null || {
+	echo "Error: Failed to cd into $dir" >&2
+	exit 1
+}

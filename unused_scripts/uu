@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+
+dev="${1:?Usage: uu <device>}"
+dir="/mnt/$dev"
+
+# Unmount safely
+if ! umount "$dir" 2>/dev/null; then
+	echo "Warning: umount failed or already unmounted: $dir" >&2
+fi
+
+# Confirm it's not still a mountpoint
+if mountpoint -q "$dir"; then
+	echo "Error: $dir still appears to be mounted" >&2
+	exit 1
+fi
+
+# Remove directory only if empty
+if [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+	rmdir "$dir" 2>/dev/null || {
+		echo "Error: Failed to remove $dir" >&2
+		exit 1
+	}
+fi
