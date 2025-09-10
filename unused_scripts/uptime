@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+
+get_command() {
+	PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" command -v "$1"
+}
+
+AWK="$(get_command awk)"
+ECHO="$(get_command echo)"
+
+# shellcheck disable=SC2016
+uptime=$($AWK '{ printf "%dd:%dh:%dm:%ds",
+             ($1/86400), ($1%86400/3600), ($1%3600/60), ($1%60) }' /proc/uptime)
+$ECHO "$uptime"

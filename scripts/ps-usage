@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""proc_mem.py - list processes with memory usage, sorted by RSS."""
+
+import os
+import pwd
+import sys
+
+
+def is_number(s: str) -> bool:
+    return s.isdigit()
+
+
+def read_statm(path):
+    with open(path) as f:
+        parts = f.readline().split()
+    if len(parts) < 6:
+        return None
+    size, rss, shared, text, lib, data = (int(x) for x in parts[:6])
+    return size, rss, shared, text, lib, data
+
+
+def read_cmdline(path):
+    with open(path, "rb") as f:
+        raw = f.read()
+    cmd = raw.replace(b"\0", b" ").decode(errors="replace").strip()
+    return cmd
+
+
+def read_uid(path):
+    with open(path) as f:
+        for line in f:
+            if line.startswith("Uid:"):
+                parts = line.split()
+                return int(parts[1])
+    return None
+
+
+def user_for_uid(uid):
+    if uid is None:
+        return "?"
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return str(uid)
+
+
+def main():
+    pagesize = os.sysconf("SC_PAGE_SIZE")
+    if pagesize <= 0:
+        pagesize = 4096
+
+    print(
+        "SIZE - data + stack\n"
+        "RSS - actual RAM the process is using right now (includes shared libs)\n"
+        "Private - RAM uniquely used by this process (without shared libs)\n")
+
+    print("{:>13}{:>13}{:>13} {:<8} {}".format("SIZE(MB)", "RSS(MB)",
+                                               "Private(MB)", "USER",
+                                               "COMMAND"))
+
+    entries = []  # (rss_mb, line)
+
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return 1
+
+    for pid in pids:
+        if not is_number(pid):
+            continue
+
+        base = f"/proc/{pid}"
+
+        try:
+            statm = read_statm(base + "/statm")
+        except OSError:
+            continue
+        if statm is None:
+            continue
+        size, rss, shared, text, lib, data = statm
+
+        size_mb = data * pagesize / 1048576.0
+        rss_mb = rss * pagesize / 1048576.0
+        priv_mb = (rss - shared) * pagesize / 1048576.0
+
+        try:
+            cmd = read_cmdline(base + "/cmdline")
+        except OSError:
+            continue
+
+        if not cmd:
+            continue
+        if len(cmd) > 80:
+            cmd = cmd[:80]
+
+        uid = None
+        try:
+            uid = read_uid(base + "/status")
+        except OSError:
+            pass
+
+        user = user_for_uid(uid)
+
+        line = "{:>13.2f}{:>13.2f}{:>13.2f} {:<8} {}".format(
+            size_mb, rss_mb, priv_mb, user, cmd)
+
+        entries.append((rss_mb, line))
+
+    entries.sort(key=lambda e: e[0], reverse=True)
+
+    for _, line in entries:
+        print(line)
+
+    # Kernel memory usage
+    total = 0
+    try:
+        with open("/proc/meminfo") as meminfo:
+            for line in meminfo:
+                if any(key in line for key in ("KernelStack", "Slab",
+                                               "PageTables", "VmallocUsed")):
+                    parts = line.split()
+                    try:
+                        total += int(parts[1])
+                    except (IndexError, ValueError):
+                        pass
+    except OSError:
+        pass
+
+    print(f"\nKernel RAM usage: {total / 1024.0:.2f} MB")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

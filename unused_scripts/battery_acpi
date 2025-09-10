@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+acpi -abt | sort -fh | awk -F "(,|:)" ' 
+/^Adapter.*on-line/ { chrg=1 }
+/^Battery / { 
+	label = $1;
+	gsub(/Battery /, "B", label)
+	a[label] = $3
+}
+/^Therm/ { 
+	therm = substr($3, 0, 5);
+	gsub(/\s+/, "", therm);
+}
+END { 
+	if (chrg) {
+		printf "CHRG "
+	}
+	for (i=0; i < 5; i++)
+	{
+		label = "B" i
+		if (label in a) {
+			command = "echo \"" a[label] "\" | dbar -nonl -w 11 -l \"" label ":\"";
+			command | getline batt
+			printf batt " "
+		}
+	}
+	printf "(" therm "°C)";
+}'
